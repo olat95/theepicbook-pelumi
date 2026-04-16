@@ -1,0 +1,8 @@
+---
+app_dir: /opt/epicbook
+app_repo: https://github.com/pravinmishraaws/theepicbook.git
+app_port: 8080
+db_name: bookstore
+db_user: epicadmin
+db_password: EpicBook123!
+db_host: MYSQL_FQDN

@@ -1,0 +1,4 @@
+---
+- name: restart epicbook
+  shell: pm2 restart epicbook
+  changed_when: false
