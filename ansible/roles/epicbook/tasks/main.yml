@@ -6,6 +6,7 @@
     owner: azureuser
     group: azureuser
     mode: '0755'
+  become: yes
 
 - name: Clone EpicBook repository
   git:
@@ -13,6 +14,14 @@
     dest: "{{ app_dir }}"
     version: main
     force: yes
+  become: yes
+
+- name: Set app directory ownership to azureuser
+  file:
+    path: "{{ app_dir }}"
+    owner: azureuser
+    group: azureuser
+    recurse: yes
   become: yes
 
 - name: Deploy config/config.json for Sequelize
@@ -36,6 +45,7 @@
       --ssl-mode=REQUIRED \
       -e "CREATE DATABASE IF NOT EXISTS {{ db_name }};"
   changed_when: false
+  become: no
 
 - name: Install npm dependencies
   npm:
@@ -54,16 +64,23 @@
   changed_when: false
   become: yes
 
-- name: Stop existing PM2 epicbook process
+- name: Stop existing PM2 epicbook process as azureuser
   shell: pm2 delete epicbook || true
   changed_when: false
   become: yes
+  become_user: azureuser
 
-- name: Start EpicBook with PM2
+- name: Stop root PM2 daemon if running
+  shell: pm2 kill || true
+  changed_when: false
+  become: yes
+
+- name: Start EpicBook with PM2 as azureuser
   shell: pm2 start {{ app_dir }}/server.js --name epicbook
   args:
     chdir: "{{ app_dir }}"
   become: yes
+  become_user: azureuser
 
 - name: Wait for app to start and create tables
   wait_for:
@@ -71,40 +88,44 @@
     delay: 5
     timeout: 30
 
-- name: Check if author table exists
+- name: Check if author table has data
   shell: |
     mysql -h {{ db_host }} -u {{ db_user }} -p{{ db_password }} \
       --ssl-mode=REQUIRED \
-      -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='{{ db_name }}' AND table_name='author';" \
-      -s --skip-column-names
-  register: author_table_check
+      -e "SELECT COUNT(*) FROM {{ db_name }}.author;" -s --skip-column-names
+  register: author_count
   changed_when: false
+  become: no
 
 - name: Seed author data
   shell: |
     mysql -h {{ db_host }} -u {{ db_user }} -p{{ db_password }} \
       --ssl-mode=REQUIRED \
       {{ db_name }} < {{ app_dir }}/db/author_seed.sql
-  when: author_table_check.stdout | trim == "0"
+  when: author_count.stdout | trim == "0"
+  become: no
 
 - name: Seed books data
   shell: |
     mysql -h {{ db_host }} -u {{ db_user }} -p{{ db_password }} \
       --ssl-mode=REQUIRED \
       {{ db_name }} < {{ app_dir }}/db/books_seed.sql
-  when: author_table_check.stdout | trim == "0"
+  when: author_count.stdout | trim == "0"
+  become: no
 
-- name: Save PM2 process list
+- name: Save PM2 process list as azureuser
   shell: pm2 save
   changed_when: false
   become: yes
+  become_user: azureuser
 
-- name: Setup PM2 startup via systemd
+- name: Setup PM2 startup via systemd as azureuser
   shell: pm2 startup systemd -u azureuser --hp /home/azureuser
+  register: pm2_startup
   changed_when: false
   become: yes
 
-- name: Enable PM2 service
+- name: Enable PM2 service for azureuser
   systemd:
     name: pm2-azureuser
     enabled: yes
